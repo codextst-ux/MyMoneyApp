@@ -196,6 +196,7 @@ class MovimientoService:
         for persona_id, nombre, tipo, saldo in filas:
             if persona_id not in saldos:
                 saldos[persona_id] = {
+                    "persona_id": persona_id,
                     "nombre": nombre,
                     "a_favor": dinero(0),
                     "debo": dinero(0)
@@ -207,6 +208,48 @@ class MovimientoService:
                 saldos[persona_id]["debo"] += dinero(saldo)
 
         return list(saldos.values())
+
+    def obtener_desglose_saldo_persona(self, persona_id):
+        conexion = conectar()
+
+        consulta = """
+            SELECT
+                movimiento.id,
+                movimiento.fecha,
+                movimiento.tipo,
+                movimiento.descripcion,
+                movimiento.monto,
+                COALESCE(SUM(pago.monto), 0) AS pagado,
+                movimiento.monto - COALESCE(SUM(pago.monto), 0) AS saldo,
+                movimiento.gasto_origen_id
+            FROM movimientos AS movimiento
+            LEFT JOIN movimientos AS pago
+                ON pago.movimiento_origen_id = movimiento.id
+                AND pago.tipo = 'pago'
+            WHERE movimiento.tipo IN ('prestamo', 'deuda')
+                AND movimiento.persona_id = ?
+            GROUP BY movimiento.id
+            HAVING saldo > 0.004
+            ORDER BY movimiento.fecha DESC, movimiento.id DESC
+        """
+        filas = conexion.execute(consulta, (persona_id,)).fetchall()
+        conexion.close()
+
+        desglose = []
+        for fila in filas:
+            desglose.append({
+                "id": fila[0],
+                "fecha": fila[1],
+                "tipo": fila[2],
+                "descripcion": fila[3],
+                "monto": dinero(fila[4]),
+                "pagado": dinero(fila[5]),
+                "saldo": dinero(fila[6]),
+                "gasto_origen_id": fila[7]
+            })
+
+        return desglose
+
 
     def obtener_resumen_financiero(self):
         movimientos = self.obtener_todos()

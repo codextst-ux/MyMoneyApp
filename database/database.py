@@ -95,6 +95,13 @@ def crear_tablas():
         )
     """)
 
+    conexion.execute("""
+        CREATE TABLE IF NOT EXISTS configuracion (
+            clave TEXT PRIMARY KEY,
+            valor TEXT
+        )
+    """)
+
     conexion.commit()
 
     crear_persona_yo(conexion)
@@ -148,6 +155,22 @@ def crear_persona_yo(conexion):
 
 
 def crear_categorias_predeterminadas(conexion):
+    inicializado = conexion.execute("""
+        SELECT valor FROM configuracion WHERE clave = 'categorias_inicializadas'
+    """).fetchone()
+
+    if inicializado:
+        return
+
+    total_existentes = conexion.execute("SELECT COUNT(*) FROM categorias").fetchone()[0]
+    if total_existentes > 0:
+        conexion.execute("""
+            INSERT OR REPLACE INTO configuracion (clave, valor)
+            VALUES ('categorias_inicializadas', '1')
+        """)
+        conexion.commit()
+        return
+
     categorias = [
         "Alimentación", "Transporte", "Vivienda",
         "Educación", "Entretenimiento", "Servicios", "Compras"
@@ -157,4 +180,10 @@ def crear_categorias_predeterminadas(conexion):
         INSERT OR IGNORE INTO categorias (nombre)
         VALUES (?)
     """, [(categoria,) for categoria in categorias])
+
+    conexion.execute("""
+        INSERT OR REPLACE INTO configuracion (clave, valor)
+        VALUES ('categorias_inicializadas', '1')
+    """)
     conexion.commit()
+
