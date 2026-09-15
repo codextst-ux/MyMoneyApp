@@ -137,27 +137,197 @@ class PersonasWindow(tk.Toplevel):
 
 class SaldosWindow(tk.Toplevel):
     def __init__(self, app):
-        super().__init__(app); self.title("Saldos por persona"); self.geometry("620x420"); self.transient(app)
-        box=ttk.Frame(self,padding=20); box.pack(fill="both",expand=True)
-        ttk.Label(box,text="PRÉSTAMOS Y DEUDAS PENDIENTES",style="Subtitle.TLabel").pack(anchor="w",pady=(0,10))
-        tree=tabla(box,("nombre","a_favor","debo","neto"),{"nombre":"Persona","a_favor":"Te debe","debo":"Le debes","neto":"Saldo neto"}); tree.pack(fill="both",expand=True)
-        for saldo in app.movimientos.obtener_saldos_por_persona():
-            neto=saldo["a_favor"]-saldo["debo"]
-            tree.insert("","end",values=(saldo["nombre"],f"{saldo['a_favor']:.2f} Bs",f"{saldo['debo']:.2f} Bs",f"{neto:.2f} Bs"))
+        super().__init__(app); self.app = app; self.title("Saldos por persona"); self.geometry("920x620"); self.minsize(800, 520); self.transient(app)
+        self.persona_seleccionada = None
+        self.desglose_items = {}
+
+        box = ttk.Frame(self, padding=20)
+        box.pack(fill="both", expand=True)
+
+        top_frame = ttk.Frame(box)
+        top_frame.pack(fill="both", expand=True)
+
+        header_top = ttk.Frame(top_frame)
+        header_top.pack(fill="x", pady=(0, 6))
+        ttk.Label(header_top, text="PRÉSTAMOS Y DEUDAS PENDIENTES", style="Subtitle.TLabel").pack(side="left")
+        ttk.Button(header_top, text="↻ Actualizar", command=self.actualizar).pack(side="right")
+
+        self.tree_personas = tabla(
+            top_frame,
+            ("nombre", "a_favor", "debo", "neto"),
+            {"nombre": "Persona", "a_favor": "Te debe", "debo": "Le debes", "neto": "Saldo neto"}
+        )
+        self.tree_personas.pack(fill="both", expand=True)
+        self.tree_personas.bind("<<TreeviewSelect>>", self.al_seleccionar_persona)
+
+        separator = ttk.Separator(box, orient="horizontal")
+        separator.pack(fill="x", pady=14)
+
+        bottom_frame = ttk.Frame(box)
+        bottom_frame.pack(fill="both", expand=True)
+
+        self.lbl_desglose = ttk.Label(
+            bottom_frame,
+            text="Selecciona una persona arriba para ver el desglose de lo que debe.",
+            style="Subtitle.TLabel"
+        )
+        self.lbl_desglose.pack(anchor="w", pady=(0, 8))
+
+        heads_desglose = {
+            "fecha": "Fecha",
+            "tipo": "Tipo",
+            "descripcion": "Concepto / Origen",
+            "monto": "Total",
+            "pagado": "Pagado",
+            "saldo": "Saldo pendiente"
+        }
+        self.tree_desglose = tabla(bottom_frame, tuple(heads_desglose), heads_desglose)
+        self.tree_desglose.column("fecha", width=95)
+        self.tree_desglose.column("tipo", width=95)
+        self.tree_desglose.column("descripcion", width=340)
+        self.tree_desglose.column("monto", width=105)
+        self.tree_desglose.column("pagado", width=100)
+        self.tree_desglose.column("saldo", width=115)
+        self.tree_desglose.pack(fill="both", expand=True)
+        self.tree_desglose.bind("<Double-1>", lambda e: self.ver_distribucion_gasto())
+
+        btn_bar = ttk.Frame(bottom_frame)
+        btn_bar.pack(fill="x", pady=(10, 0))
+        ttk.Button(btn_bar, text="Ver distribución del gasto", command=self.ver_distribucion_gasto).pack(side="left")
+        ttk.Button(btn_bar, text="Registrar pago", command=self.registrar_pago).pack(side="left", padx=8)
+
+        self.cargar_personas()
+
+    def cargar_personas(self):
+        limpiar(self.tree_personas)
+        saldos = self.app.movimientos.obtener_saldos_por_persona()
+        for s in saldos:
+            neto = s["a_favor"] - s["debo"]
+            pid = str(s.get("persona_id", s["nombre"]))
+            self.tree_personas.insert(
+                "", "end", iid=pid,
+                values=(s["nombre"], f"{s['a_favor']:.2f} Bs", f"{s['debo']:.2f} Bs", f"{neto:.2f} Bs")
+            )
+
+        if self.persona_seleccionada and self.tree_personas.exists(str(self.persona_seleccionada)):
+            self.tree_personas.selection_set(str(self.persona_seleccionada))
+            self.cargar_desglose(self.persona_seleccionada)
+        else:
+            limpiar(self.tree_desglose)
+            self.lbl_desglose.configure(text="Selecciona una persona arriba para ver el desglose de lo que debe.")
+
+    def al_seleccionar_persona(self, event=None):
+        seleccion = self.tree_personas.selection()
+        if not seleccion:
+            return
+        iid = seleccion[0]
+        try:
+            persona_id = int(iid)
+        except ValueError:
+            return
+        self.persona_seleccionada = persona_id
+        self.cargar_desglose(persona_id)
+
+    def cargar_desglose(self, persona_id):
+        limpiar(self.tree_desglose)
+        self.desglose_items.clear()
+        persona = self.app.personas.obtener_por_id(persona_id)
+        nombre = persona.nombre if persona else "Persona"
+
+        items = self.app.movimientos.obtener_desglose_saldo_persona(persona_id)
+        if not items:
+            self.lbl_desglose.configure(text=f"No hay saldos pendientes con {nombre}.")
+            return
+
+        self.lbl_desglose.configure(
+            text=f"DESGLOSE DE OBLIGACIONES PENDIENTES CON: {nombre.upper()} ({len(items)} pendiente{'s' if len(items) > 1 else ''})"
+        )
+
+        for item in items:
+            self.desglose_items[str(item["id"])] = item
+            sentido = "Te debe" if item["tipo"] == "prestamo" else "Le debes"
+            self.tree_desglose.insert(
+                "", "end", iid=str(item["id"]),
+                values=(
+                    item["fecha"],
+                    sentido,
+                    item["descripcion"],
+                    f"{item['monto']:.2f} Bs",
+                    f"{item['pagado']:.2f} Bs",
+                    f"{item['saldo']:.2f} Bs"
+                )
+            )
+
+    def ver_distribucion_gasto(self):
+        seleccion = self.tree_desglose.selection()
+        if not seleccion:
+            return messagebox.showinfo("Selección", "Selecciona una obligación del desglose.", parent=self)
+        item = self.desglose_items.get(seleccion[0])
+        if not item or not item.get("gasto_origen_id"):
+            return messagebox.showinfo(
+                "Distribución",
+                "Este registro no proviene de un gasto compartido (es un préstamo o deuda directo).",
+                parent=self
+            )
+        gasto = self.app.movimientos.obtener_por_id(item["gasto_origen_id"])
+        if gasto:
+            DetalleGastoWindow(self.app, gasto)
+        else:
+            error(self, "No se encontró el gasto original compartido.")
+
+    def registrar_pago(self):
+        self.app.abrir_formulario("pago")
+
+    def actualizar(self):
+        self.cargar_personas()
+        self.app.actualizar_inicio()
+
 
 
 class CategoriasWindow(tk.Toplevel):
-    def __init__(self,app):
-        super().__init__(app); self.app=app; self.title("Categorías"); self.geometry("440x400"); box=ttk.Frame(self,padding=20); box.pack(fill="both",expand=True)
-        self.tree=tabla(box,("id","nombre"),{"id":"ID","nombre":"Nombre"}); self.tree.pack(fill="both",expand=True); ttk.Button(box,text="Agregar categoría",command=self.agregar).pack(anchor="w",pady=(12,0)); self.cargar()
+    def __init__(self, app):
+        super().__init__(app); self.app = app; self.title("Categorías"); self.geometry("480x420"); box = ttk.Frame(self, padding=20); box.pack(fill="both", expand=True)
+        self.tree = tabla(box, ("id", "nombre"), {"id": "ID", "nombre": "Nombre"}); self.tree.column("id", width=70); self.tree.pack(fill="both", expand=True); buttons = ttk.Frame(box); buttons.pack(fill="x", pady=(12, 0))
+        for text, cmd in [("Agregar", self.agregar), ("Editar", self.editar), ("Eliminar", self.eliminar)]: ttk.Button(buttons, text=text, command=cmd).pack(side="left", padx=(0, 8))
+        self.cargar()
+
     def cargar(self):
         limpiar(self.tree)
-        for c in self.app.categorias.obtener_todas(): self.tree.insert("","end",values=(c.id,c.nombre))
+        for c in self.app.categorias.obtener_todas(): self.tree.insert("", "end", iid=str(c.id), values=(c.id, c.nombre))
+
+    def actual(self):
+        if not self.tree.selection(): raise ValueError("Selecciona una categoría.")
+        return self.app.categorias.obtener_por_id(int(self.tree.selection()[0]))
+
     def agregar(self):
-        name=simpledialog.askstring("Nueva categoría","Nombre:",parent=self)
+        name = simpledialog.askstring("Nueva categoría", "Nombre:", parent=self)
         if name:
-            try: self.app.categorias.crear(Categoria(name)); self.cargar()
-            except Exception as exc: error(self,exc)
+            try:
+                self.app.categorias.crear(Categoria(name))
+                self.cargar()
+                self.app.actualizar_inicio()
+            except Exception as exc: error(self, exc)
+
+    def editar(self):
+        try:
+            c = self.actual()
+            nombre = simpledialog.askstring("Editar categoría", "Nombre:", initialvalue=c.nombre, parent=self)
+            if nombre:
+                c.nombre = nombre.strip()
+                self.app.categorias.actualizar(c)
+                self.cargar()
+                self.app.actualizar_inicio()
+        except Exception as exc: error(self, exc)
+
+    def eliminar(self):
+        try:
+            c = self.actual()
+            if messagebox.askyesno("Eliminar", f"¿Eliminar la categoría '{c.nombre}'?", parent=self):
+                self.app.categorias.eliminar(c.id)
+                self.cargar()
+                self.app.actualizar_inicio()
+        except Exception as exc: error(self, exc)
+
 
 
 class MovimientosWindow(tk.Toplevel):
