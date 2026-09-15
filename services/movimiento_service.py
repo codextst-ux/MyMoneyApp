@@ -214,6 +214,7 @@ class MovimientoService:
             movimiento.id: movimiento
             for movimiento in movimientos
         }
+        yo_id = self._obtener_yo_id()
         resumen = {
             "ingresos": dinero(0),
             "gastos": dinero(0),
@@ -227,7 +228,10 @@ class MovimientoService:
             if movimiento.tipo == "ingreso":
                 resumen["ingresos"] += movimiento.monto
 
-            elif movimiento.tipo == "gasto":
+            elif (
+                movimiento.tipo == "gasto"
+                and movimiento.pagado_por_id == yo_id
+            ):
                 resumen["gastos"] += movimiento.monto
 
             elif (
@@ -267,7 +271,10 @@ class MovimientoService:
             flujo = dinero(0)
             if movimiento.tipo == "ingreso":
                 flujo = movimiento.monto
-            elif movimiento.tipo == "gasto":
+            elif (
+                movimiento.tipo == "gasto"
+                and movimiento.pagado_por_id == yo_id
+            ):
                 flujo = -movimiento.monto
             elif movimiento.tipo == "prestamo" and not movimiento.gasto_origen_id:
                 flujo = -movimiento.monto
@@ -297,6 +304,16 @@ class MovimientoService:
         )
 
         return resumen
+    
+    def _obtener_yo_id(self):
+        conexion = conectar()
+        fila = conexion.execute("""
+            SELECT id FROM personas WHERE nombre = 'Yo'
+        """).fetchone()
+        conexion.close()
+
+        return fila[0] if fila else None
+
 
     def obtener_por_id(self, movimiento_id):
         conexion = conectar()
