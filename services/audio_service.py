@@ -4,18 +4,47 @@ import uuid
 
 
 def transcribir(ruta):
-    """Transcribe con OpenAI solo cuando el usuario configuró el entorno."""
-    if not os.environ.get("OPENAI_API_KEY"):
-        raise ValueError("Configura OPENAI_API_KEY para transcribir audio.")
+    """Transcribe usando la librería gratuita y multiplataforma SpeechRecognition."""
     try:
-        from openai import OpenAI
+        import speech_recognition as sr
     except ImportError as exc:
-        raise ValueError("Instala las dependencias: python3 -m pip install -r requirements.txt") from exc
-    with open(ruta, "rb") as archivo:
-        resultado = OpenAI().audio.transcriptions.create(
-            model="gpt-4o-mini-transcribe", file=archivo
-        )
-    return resultado.text.strip()
+        raise ValueError("Instala las dependencias: pip install -r requirements.txt") from exc
+
+    import tempfile
+    import soundfile as sf
+
+    archivo_a_usar = ruta
+    temp_wav = None
+
+    # Si no es un WAV estándar, convertirlo a WAV temporal usando soundfile
+    if not ruta.lower().endswith(".wav"):
+        try:
+            data, samplerate = sf.read(ruta)
+            descriptor, temp_wav = tempfile.mkstemp(suffix=".wav")
+            os.close(descriptor)
+            sf.write(temp_wav, data, samplerate)
+            archivo_a_usar = temp_wav
+        except Exception:
+            archivo_a_usar = ruta
+
+    try:
+        r = sr.Recognizer()
+        with sr.AudioFile(archivo_a_usar) as fuente:
+            audio = r.record(fuente)
+
+        texto = r.recognize_google(audio, language="es-ES")
+        return texto.strip()
+    except sr.UnknownValueError:
+        raise ValueError("No se pudo entender el audio. Intenta hablar más claro o cerca del micrófono.")
+    except sr.RequestError as exc:
+        raise ValueError(f"No se pudo conectar al servicio de reconocimiento de voz: {exc}")
+    finally:
+        if temp_wav and os.path.exists(temp_wav):
+            try:
+                os.remove(temp_wav)
+            except OSError:
+                pass
+
 
 
 def guardar_audio(ruta):

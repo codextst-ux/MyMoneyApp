@@ -1,6 +1,17 @@
+# Python
 __pycache__/
 *.py[cod]
 *$py.class
+*.pyc
+
+# Environment & local
+.env
 .venv/
 venv/
-*.db
+ENV/
+
+# Database (optional local state)
+# dinero.db
+
+# Audio recordings
+audios/

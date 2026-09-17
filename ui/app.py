@@ -518,93 +518,293 @@ class NuevaNotaWindow(tk.Toplevel):
 
 
 class FormMovimiento(tk.Toplevel):
-    TITLES={"ingreso":"Registrar ingreso","gasto":"Registrar gasto","prestamo":"Registrar préstamo","deuda":"Registrar deuda","pago":"Registrar pago"}
-    def __init__(self,app,tipo,mov=None,datos=None,nota_id=None,on_success=None):
-        super().__init__(app); self.app,self.tipo,self.mov=app,tipo,mov; self.datos=datos or {}; self.nota_id,self.on_success=nota_id,on_success; self.partes=list(mov.participaciones) if mov else []; self.partes_nombres=list(self.datos.get("participaciones", [])); self.val={}; self.title(("Editar: " if mov else "")+self.TITLES[tipo]); self.transient(app); self.grab_set(); self.ui()
+    TITLES = {
+        "ingreso": "Registrar ingreso",
+        "gasto": "Registrar gasto",
+        "prestamo": "Registrar préstamo",
+        "deuda": "Registrar deuda",
+        "pago": "Registrar pago"
+    }
+    TIPO_LABELS = {
+        "gasto": "Gasto",
+        "ingreso": "Ingreso",
+        "prestamo": "Préstamo",
+        "deuda": "Deuda",
+        "pago": "Pago"
+    }
+    LABEL_TIPOS = {
+        "Gasto": "gasto",
+        "Ingreso": "ingreso",
+        "Préstamo": "prestamo",
+        "Deuda": "deuda",
+        "Pago": "pago"
+    }
+
+    def __init__(self, app, tipo, mov=None, datos=None, nota_id=None, on_success=None):
+        super().__init__(app)
+        self.app, self.tipo, self.mov = app, tipo, mov
+        self.datos = datos or {}
+        self.nota_id, self.on_success = nota_id, on_success
+        self.partes = list(mov.participaciones) if mov else []
+        self.partes_nombres = list(self.datos.get("participaciones", []))
+        self.val = {}
+        self.title(("Editar: " if mov else "") + self.TITLES.get(tipo, "Registrar movimiento"))
+        self.transient(app)
+        self.grab_set()
+        self.ui()
+
     def ui(self):
-        box=ttk.Frame(self,padding=24); box.pack(fill="both",expand=True); ttk.Label(box,text=self.title(),font=("Arial",16,"bold")).grid(row=0,column=0,columnspan=2,sticky="w",pady=(0,16)); row=1
-        if self.tipo=="pago" and not self.mov:
-            row=self.configurar_pago(box,row)
-        self.entry(box,"Descripción:","descripcion",self.mov.descripcion if self.mov else self.datos.get("descripcion", ""),row); row+=1; self.entry(box,"Monto (Bs):","monto",f"{self.mov.monto:.2f}" if self.mov else self.datos.get("monto", ""),row); row+=1; self.entry(box,"Fecha:","fecha",self.mov.fecha if self.mov else self.datos.get("fecha", date.today().isoformat()),row); row+=1
-        medio_actual="Efectivo" if (self.mov and self.mov.medio_pago=="efectivo") or self.datos.get("medio_pago")=="efectivo" else "QR / Virtual"; self.combo(box,"Medio:","medio_pago",["QR / Virtual","Efectivo"],row,medio_actual); row+=1
-        if self.tipo in {"ingreso","gasto"}:
-            cats=self.app.categorias.obtener_todas(); self.val["cats"]=cats; selected=next((c.nombre for c in cats if self.mov and c.id==self.mov.categoria_id),self.datos.get("categoria", cats[0].nombre if cats else "")); self.combo(box,"Categoría:","categoria",[c.nombre for c in cats],row,selected); row+=1
-        if self.tipo in {"gasto","prestamo","deuda"}:
-            people=self.app.personas.obtener_todas(); self.val["people"]=people; pid=self.mov.pagado_por_id if self.mov and self.tipo=="gasto" else (self.mov.persona_id if self.mov else None); selected=next((p.nombre for p in people if p.id==pid),self.datos.get("pagado_por", people[0].nombre if people else "")); self.combo(box,"Pagó:" if self.tipo=="gasto" else "Persona:","persona",[p.nombre for p in people],row,selected)
-            if self.tipo in {"prestamo","deuda"}: ttk.Button(box,text="+ Nueva persona",command=self.nueva_persona).grid(row=row,column=2,padx=(8,0))
-            row+=1
-        if self.tipo=="gasto": self.part_label=ttk.Label(box,text=self.part_text(),foreground="#64748b"); self.part_label.grid(row=row,column=0,sticky="w"); ttk.Button(box,text="Distribuir gasto",command=self.distribuir).grid(row=row,column=1,sticky="e"); row+=1
-        ttk.Button(box,text="Confirmar movimiento" if self.nota_id else "Guardar",command=self.guardar).grid(row=row,column=1,sticky="e",pady=(20,0))
-    def entry(self,p,label,key,value,row):
-        ttk.Label(p,text=label).grid(row=row,column=0,sticky="w",padx=(0,16),pady=6); self.val[key]=tk.StringVar(value=value); ttk.Entry(p,textvariable=self.val[key],width=38).grid(row=row,column=1,pady=6)
-    def combo(self,p,label,key,values,row,selected=None):
-        ttk.Label(p,text=label).grid(row=row,column=0,sticky="w",padx=(0,16),pady=6); self.val[key]=tk.StringVar(value=selected or (values[0] if values else "")); combo=ttk.Combobox(p,textvariable=self.val[key],values=values,state="readonly",width=35); combo.grid(row=row,column=1,pady=6); self.val[f"{key}_combo"]=combo
-    def configurar_pago(self,box,row):
-        pending=self.app.movimientos.obtener_pendientes_para_pago(); self.val["pending"]=pending
-        personas={p.id:p for p in self.app.personas.obtener_todas()}
-        personas_pendientes=sorted({personas[m.persona_id].nombre for m,_ in pending if m.persona_id in personas})
-        self.combo(box,"Persona:","pago_persona",["Todas"]+personas_pendientes,row); self.val["pago_persona_combo"].bind("<<ComboboxSelected>>",self.actualizar_pagos); row+=1
-        self.combo(box,"Pagar:","origen",[],row); self.actualizar_pagos(); return row+1
-    def texto_pago(self,movimiento,saldo):
+        self.box = ttk.Frame(self, padding=24)
+        self.box.pack(fill="both", expand=True)
+
+        self.lbl_titulo = ttk.Label(self.box, text=self.title(), font=("Arial", 16, "bold"))
+        self.lbl_titulo.grid(row=0, column=0, columnspan=3, sticky="w", pady=(0, 16))
+
+        ttk.Label(self.box, text="Tipo:").grid(row=1, column=0, sticky="w", padx=(0, 16), pady=6)
+        self.tipo_display = tk.StringVar(value=self.TIPO_LABELS.get(self.tipo, "Gasto"))
+        if self.mov:
+            ttk.Label(self.box, text=self.tipo_display.get(), font=("Arial", 10, "bold")).grid(row=1, column=1, sticky="w", pady=6)
+        else:
+            tipos_opciones = ["Gasto", "Ingreso", "Préstamo", "Deuda"]
+            if self.tipo == "pago":
+                tipos_opciones.append("Pago")
+            self.tipo_combo = ttk.Combobox(self.box, textvariable=self.tipo_display, values=tipos_opciones, state="readonly", width=35)
+            self.tipo_combo.grid(row=1, column=1, pady=6, sticky="w")
+            self.tipo_combo.bind("<<ComboboxSelected>>", self.on_tipo_change)
+
+        self.entry(self.box, "Descripción:", "descripcion", self.mov.descripcion if self.mov else self.datos.get("descripcion", ""), 2)
+        self.entry(self.box, "Monto (Bs):", "monto", f"{self.mov.monto:.2f}" if self.mov else self.datos.get("monto", ""), 3)
+        self.entry(self.box, "Fecha:", "fecha", self.mov.fecha if self.mov else self.datos.get("fecha", date.today().isoformat()), 4)
+
+        medio_actual = "Efectivo" if (self.mov and self.mov.medio_pago == "efectivo") or self.datos.get("medio_pago") == "efectivo" else "QR / Virtual"
+        self.combo(self.box, "Medio:", "medio_pago", ["QR / Virtual", "Efectivo"], 5, medio_actual)
+
+        self.dynamic_frame = ttk.Frame(self.box)
+        self.dynamic_frame.grid(row=6, column=0, columnspan=3, sticky="nsew", pady=(2, 0))
+
+        self.render_dynamic_fields()
+
+        btn_txt = "Confirmar movimiento" if self.nota_id else "Guardar"
+        ttk.Button(self.box, text=btn_txt, command=self.guardar).grid(row=7, column=1, sticky="e", pady=(18, 0))
+
+    def on_tipo_change(self, event=None):
+        nuevo_tipo = self.LABEL_TIPOS.get(self.tipo_display.get(), "gasto")
+        self.tipo = nuevo_tipo
+        self.title(("Editar: " if self.mov else "") + self.TITLES.get(nuevo_tipo, "Registrar movimiento"))
+        self.lbl_titulo.configure(text=self.title())
+        self.render_dynamic_fields()
+
+    def render_dynamic_fields(self):
+        for child in self.dynamic_frame.winfo_children():
+            child.destroy()
+
+        row = 0
+        if self.tipo == "pago" and not self.mov:
+            row = self.configurar_pago(self.dynamic_frame, row)
+
+        if self.tipo in {"ingreso", "gasto"}:
+            cats = self.app.categorias.obtener_todas()
+            self.val["cats"] = cats
+            selected_cat = next(
+                (c.nombre for c in cats if self.mov and c.id == self.mov.categoria_id),
+                self.datos.get("categoria", cats[0].nombre if cats else "")
+            )
+            if cats and selected_cat not in [c.nombre for c in cats]:
+                selected_cat = cats[0].nombre
+
+            ttk.Label(self.dynamic_frame, text="Categoría:").grid(row=row, column=0, sticky="w", padx=(0, 16), pady=6)
+            self.val["categoria"] = tk.StringVar(value=selected_cat)
+            cat_combo = ttk.Combobox(self.dynamic_frame, textvariable=self.val["categoria"], values=[c.nombre for c in cats], state="readonly", width=35)
+            cat_combo.grid(row=row, column=1, pady=6, sticky="w")
+            self.val["categoria_combo"] = cat_combo
+            ttk.Button(self.dynamic_frame, text="+ Nueva categoría", command=self.nueva_categoria).grid(row=row, column=2, padx=(8, 0))
+            row += 1
+
+        if self.tipo in {"gasto", "prestamo", "deuda"}:
+            people = self.app.personas.obtener_todas()
+            self.val["people"] = people
+            pid = self.mov.pagado_por_id if self.mov and self.tipo == "gasto" else (self.mov.persona_id if self.mov else None)
+            selected_person = next(
+                (p.nombre for p in people if p.id == pid),
+                self.datos.get("pagado_por" if self.tipo == "gasto" else "persona", people[0].nombre if people else "")
+            )
+            if people and selected_person not in [p.nombre for p in people]:
+                selected_person = people[0].nombre
+
+            lbl_txt = "Pagó:" if self.tipo == "gasto" else "Persona:"
+            ttk.Label(self.dynamic_frame, text=lbl_txt).grid(row=row, column=0, sticky="w", padx=(0, 16), pady=6)
+            self.val["persona"] = tk.StringVar(value=selected_person)
+            per_combo = ttk.Combobox(self.dynamic_frame, textvariable=self.val["persona"], values=[p.nombre for p in people], state="readonly", width=35)
+            per_combo.grid(row=row, column=1, pady=6, sticky="w")
+            self.val["persona_combo"] = per_combo
+            ttk.Button(self.dynamic_frame, text="+ Nueva persona", command=self.nueva_persona).grid(row=row, column=2, padx=(8, 0))
+            row += 1
+
+        if self.tipo == "gasto":
+            self.part_label = ttk.Label(self.dynamic_frame, text=self.part_text(), foreground="#64748b")
+            self.part_label.grid(row=row, column=0, columnspan=2, sticky="w", pady=(4, 0))
+            ttk.Button(self.dynamic_frame, text="Distribuir gasto", command=self.distribuir).grid(row=row, column=2, padx=(8, 0), pady=(4, 0))
+            row += 1
+
+    def entry(self, p, label, key, value, row):
+        ttk.Label(p, text=label).grid(row=row, column=0, sticky="w", padx=(0, 16), pady=6)
+        if key not in self.val:
+            self.val[key] = tk.StringVar(value=value)
+        ttk.Entry(p, textvariable=self.val[key], width=38).grid(row=row, column=1, pady=6, sticky="w")
+
+    def combo(self, p, label, key, values, row, selected=None):
+        ttk.Label(p, text=label).grid(row=row, column=0, sticky="w", padx=(0, 16), pady=6)
+        if key not in self.val:
+            self.val[key] = tk.StringVar(value=selected or (values[0] if values else ""))
+        combo = ttk.Combobox(p, textvariable=self.val[key], values=values, state="readonly", width=35)
+        combo.grid(row=row, column=1, pady=6, sticky="w")
+        self.val[f"{key}_combo"] = combo
+
+    def configurar_pago(self, box, row):
+        pending = self.app.movimientos.obtener_pendientes_para_pago()
+        self.val["pending"] = pending
+        personas = {p.id: p for p in self.app.personas.obtener_todas()}
+        personas_pendientes = sorted({personas[m.persona_id].nombre for m, _ in pending if m.persona_id in personas})
+        self.combo(box, "Persona:", "pago_persona", ["Todas"] + personas_pendientes, row)
+        self.val["pago_persona_combo"].bind("<<ComboboxSelected>>", self.actualizar_pagos)
+        row += 1
+        self.combo(box, "Pagar:", "origen", [], row)
+        self.actualizar_pagos()
+        return row + 1
+
+    def texto_pago(self, movimiento, saldo):
         return f"{movimiento.id} | {movimiento.tipo.title()} | {self.nombre_persona(movimiento.persona_id)} | saldo {saldo:.2f} Bs"
+
     def pagos_filtrados(self):
-        persona=self.val["pago_persona"].get()
-        return [(m,s) for m,s in self.val["pending"] if persona=="Todas" or self.nombre_persona(m.persona_id)==persona]
-    def actualizar_pagos(self,event=None):
-        valores=[self.texto_pago(m,s) for m,s in self.pagos_filtrados()]
+        persona = self.val.get("pago_persona") and self.val["pago_persona"].get()
+        return [(m, s) for m, s in self.val["pending"] if persona == "Todas" or self.nombre_persona(m.persona_id) == persona]
+
+    def actualizar_pagos(self, event=None):
+        valores = [self.texto_pago(m, s) for m, s in self.pagos_filtrados()]
         self.val["origen_combo"].configure(values=valores)
         if self.val["origen"].get() not in valores:
             self.val["origen"].set(valores[0] if valores else "")
-    def person(self): return next(p for p in self.val["people"] if p.nombre==self.val["persona"].get())
+
+    def person(self):
+        nombre = self.val.get("persona") and self.val["persona"].get()
+        if not nombre:
+            raise ValueError("Debes seleccionar una persona.")
+        per = next((p for p in self.val["people"] if p.nombre == nombre), None)
+        if not per:
+            raise ValueError(f"Persona '{nombre}' no encontrada. Selecciónala o créala con '+ Nueva persona'.")
+        return per
+
     def nueva_persona(self):
-        nombre=simpledialog.askstring("Nueva persona","Nombre:",parent=self)
-        if not nombre: return
+        nombre = simpledialog.askstring("Nueva persona", "Nombre:", parent=self)
+        if not nombre:
+            return
         try:
-            persona=self.app.personas.crear(Persona(nombre))
-            self.val["people"].append(persona); self.val["persona"].set(persona.nombre)
+            persona = self.app.personas.crear(Persona(nombre))
+            self.val["people"] = self.app.personas.obtener_todas()
             self.ui_actualizar_personas()
-        except Exception as exc: error(self,exc)
+            self.val["persona"].set(persona.nombre)
+        except Exception as exc:
+            error(self, exc)
+
     def ui_actualizar_personas(self):
-        self.val["persona_combo"].configure(values=[p.nombre for p in self.val["people"]])
+        if "persona_combo" in self.val:
+            self.val["persona_combo"].configure(values=[p.nombre for p in self.val["people"]])
+
+    def nueva_categoria(self):
+        nombre = simpledialog.askstring("Nueva categoría", "Nombre:", parent=self)
+        if not nombre:
+            return
+        try:
+            cat = self.app.categorias.crear(Categoria(nombre))
+            self.val["cats"] = self.app.categorias.obtener_todas()
+            if "categoria_combo" in self.val:
+                self.val["categoria_combo"].configure(values=[c.nombre for c in self.val["cats"]])
+            self.val["categoria"].set(cat.nombre)
+        except Exception as exc:
+            error(self, exc)
+
     def nombre_persona(self, persona_id):
-        persona=self.app.personas.obtener_por_id(persona_id)
+        persona = self.app.personas.obtener_por_id(persona_id)
         return persona.nombre if persona else "Sin persona"
-    def category(self): return next(c for c in self.val["cats"] if c.nombre==self.val["categoria"].get())
+
+    def category(self):
+        nombre = self.val.get("categoria") and self.val["categoria"].get()
+        if not nombre:
+            raise ValueError("Debes seleccionar una categoría.")
+        cat = next((c for c in self.val["cats"] if c.nombre == nombre), None)
+        if not cat:
+            raise ValueError(f"Categoría '{nombre}' no encontrada. Selecciónala o créala con '+ Nueva categoría'.")
+        return cat
+
     def part_text(self):
-        if self.partes: return f"Distribuido: {sumar(p['monto'] for p in self.partes):.2f} Bs ({len(self.partes)} personas)"
-        if self.partes_nombres: return "Distribución propuesta: " + ", ".join(f"{p['nombre']} {p['monto']} Bs" for p in self.partes_nombres)
+        if self.partes:
+            return f"Distribuido: {sumar(p['monto'] for p in self.partes):.2f} Bs ({len(self.partes)} personas)"
+        if self.partes_nombres:
+            return "Distribución propuesta: " + ", ".join(f"{p['nombre']} {p['monto']} Bs" for p in self.partes_nombres)
         return "Sin distribución compartida."
+
     def distribuir(self):
-        try: DistribucionWindow(self,dinero(self.val["monto"].get()))
-        except Exception as exc: error(self,exc)
+        try:
+            DistribucionWindow(self, dinero(self.val["monto"].get()))
+        except Exception as exc:
+            error(self, exc)
+
     def guardar(self):
         try:
-            data={"id":self.mov.id if self.mov else None,"tipo":self.tipo,"descripcion":self.val["descripcion"].get(),"monto":self.val["monto"].get(),"fecha":self.val["fecha"].get(),"medio_pago":"efectivo" if self.val["medio_pago"].get()=="Efectivo" else "virtual"}
-            if self.tipo=="ingreso": data.update(persona_id=next(p.id for p in self.app.personas.obtener_todas() if p.nombre=="Yo"),categoria_id=self.category().id)
-            elif self.tipo=="gasto": data.update(pagado_por_id=self.person().id,categoria_id=self.category().id)
-            elif self.tipo in {"prestamo","deuda"}: data["persona_id"]=self.person().id
-            elif self.mov: data.update(persona_id=self.mov.persona_id,movimiento_origen_id=self.mov.movimiento_origen_id)
+            data = {
+                "id": self.mov.id if self.mov else None,
+                "tipo": self.tipo,
+                "descripcion": self.val["descripcion"].get().strip(),
+                "monto": self.val["monto"].get().strip(),
+                "fecha": self.val["fecha"].get().strip(),
+                "medio_pago": "efectivo" if self.val["medio_pago"].get() == "Efectivo" else "virtual"
+            }
+            if self.tipo == "ingreso":
+                yo = next((p for p in self.app.personas.obtener_todas() if p.nombre == "Yo"), None)
+                if not yo:
+                    raise ValueError("No se encontró la persona 'Yo'.")
+                data.update(persona_id=yo.id, categoria_id=self.category().id)
+            elif self.tipo == "gasto":
+                data.update(pagado_por_id=self.person().id, categoria_id=self.category().id)
+            elif self.tipo in {"prestamo", "deuda"}:
+                data["persona_id"] = self.person().id
+            elif self.mov:
+                data.update(persona_id=self.mov.persona_id, movimiento_origen_id=self.mov.movimiento_origen_id)
             else:
-                if not self.val["origen"].get(): raise ValueError("No hay pagos pendientes para esa persona.")
-                source=next(x for x in self.val["pending"] if x[0].id==int(self.val["origen"].get().split(" | ")[0]))[0]; data.update(persona_id=source.persona_id,movimiento_origen_id=source.id)
-            m=Movimiento(**data)
-            if self.partes:
-                m.participaciones=self.partes
-            elif self.partes_nombres:
-                existentes={p.nombre.casefold():p for p in self.app.personas.obtener_todas()}
-                m.participaciones=[]
-                for parte in self.partes_nombres:
-                    persona=existentes.get(parte["nombre"].casefold())
-                    if not persona:
-                        persona=self.app.personas.crear(Persona(parte["nombre"])); existentes[persona.nombre.casefold()]=persona
-                    m.participaciones.append({"persona_id":persona.id,"monto":parte["monto"]})
-            if self.mov: self.app.movimientos.actualizar(m)
-            else: self.app.movimientos.crear(m)
-            if self.nota_id: self.app.notas.confirmar(self.nota_id)
+                if not self.val.get("origen") or not self.val["origen"].get():
+                    raise ValueError("No hay pagos pendientes para esa persona.")
+                source = next(x for x in self.val["pending"] if x[0].id == int(self.val["origen"].get().split(" | ")[0]))[0]
+                data.update(persona_id=source.persona_id, movimiento_origen_id=source.id)
+
+            m = Movimiento(**data)
+            if self.tipo == "gasto":
+                if self.partes:
+                    m.participaciones = self.partes
+                elif self.partes_nombres:
+                    existentes = {p.nombre.casefold(): p for p in self.app.personas.obtener_todas()}
+                    m.participaciones = []
+                    for parte in self.partes_nombres:
+                        persona = existentes.get(parte["nombre"].casefold())
+                        if not persona:
+                            persona = self.app.personas.crear(Persona(parte["nombre"]))
+                            existentes[persona.nombre.casefold()] = persona
+                        m.participaciones.append({"persona_id": persona.id, "monto": parte["monto"]})
+
+            if self.mov:
+                self.app.movimientos.actualizar(m)
+            else:
+                self.app.movimientos.crear(m)
+
+            if self.nota_id:
+                self.app.notas.confirmar(self.nota_id)
+
             self.app.actualizar_inicio()
-            if self.on_success: self.on_success()
+            if self.on_success:
+                self.on_success()
             self.destroy()
-        except Exception as exc: error(self,exc)
+        except Exception as exc:
+            error(self, exc)
+
 
 
 class DistribucionWindow(tk.Toplevel):
